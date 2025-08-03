@@ -1,7 +1,7 @@
 // File: app/api/employer/emp-leaves/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'; // ✅ make sure this is the correct path
+import { authOptions } from '@/app/api/auth/[...nextauth]/authOptions'; // ✅ make sure this is the correct path
 import {connectDB} from '@/lib/mongodb';
 import Leave from '@/models/leaveModel';
 import { Session } from 'next-auth'; // ✅ Import type
