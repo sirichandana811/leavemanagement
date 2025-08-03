@@ -1,22 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '../../auth/[...nextauth]/route';
 import { connectDB } from '@/lib/mongodb';
 import User from '@/models/userModel';
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, newPassword } = await req.json();
+    const session = await getServerSession(authOptions);
+    if (!session || !session.user?.email) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
 
-    if (!email || !newPassword) {
-      return NextResponse.json({ message: 'Missing fields' }, { status: 400 });
+    const { newPassword } = await req.json();
+    if (!newPassword) {
+      return NextResponse.json({ message: 'Missing new password' }, { status: 400 });
     }
 
     await connectDB();
-
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     const updatedUser = await User.findOneAndUpdate(
-      { email },
+      { email: session.user.email },
       { password: hashedPassword },
       { new: true }
     );

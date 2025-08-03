@@ -1,333 +1,424 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
-
+import { signOut } from 'next-auth/react';
 type User = {
   _id: string;
-  email: string;
   name: string;
-  role: string;
+  email: string;
+  role: 'employee' | 'employer' | 'admin';
+  password: string;
+  leaveBalances: {
+    CL: number;
+    SL: number;
+    PL: number;
+    maxCL: number;
+    maxSL: number;
+    maxPL: number;
+  };
 };
 
-type LeaveSummary = {
-  CL: number;
-  SL: number;
-  PL: number;
-};
+const roles = ['employee', 'employer', 'admin'];
+type EditableField = 'name' | 'role' | 'CL' | 'SL' | 'PL' | 'maxCL' | 'maxSL' | 'maxPL';
 
-export default function AdminDashboard() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
-
+export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
-  const [leaveSummary, setLeaveSummary] = useState<{ [email: string]: LeaveSummary }>({});
-  const [resettingEmail, setResettingEmail] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState('');
+  const [filteredRole, setFilteredRole] = useState<string>('all');
+  const [search, setSearch] = useState('');
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'employee' });
-
-  useEffect(() => {
-    if (status === 'loading') return;
-    if (!session || session.user.role !== 'admin') {
-      alert('Access Denied. Admins only.');
-      router.push('/login');
-    }
-  }, [session, status, router]);
+  const [newUser, setNewUser] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'employee',
+  });
 
   useEffect(() => {
-    if (session?.user.role === 'admin') {
-      fetchUsers();
-      fetchLeaveData();
-    }
-  }, [session]);
+    fetchUsers();
+  }, []);
 
   const fetchUsers = async () => {
     try {
       const res = await fetch('/api/admin/users');
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Failed to fetch users:', text);
+        return;
+      }
+
       const data = await res.json();
-      setUsers(data.users || data);
+      if (data?.users) {
+        setUsers(data.users);
+      } else {
+        console.error('No users returned:', data);
+      }
     } catch (err) {
       console.error('Error fetching users:', err);
     }
   };
 
-  const fetchLeaveData = async () => {
-    try {
-      const res = await fetch('/api/admin/leaves-summary');
-      const data = await res.json();
-      setLeaveSummary(data);
-    } catch (err) {
-      console.error('Error fetching leave summary:', err);
-    }
-  };
-
-  const promoteToAdmin = async (email: string) => {
-    await fetch('/api/admin/promote-user', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
+  useEffect(() => {
     fetchUsers();
+  }, []);
+
+
+  const handleInputChange = (
+    id: string,
+    field: EditableField,
+    value: string | number
+  ) => {
+    setUsers((prevUsers) =>
+      prevUsers.map((user) => {
+        if (user._id === id) {
+          if (field === 'name') {
+            return { ...user, name: value as string };
+          }
+          if (field === 'role') {
+            return {
+              ...user,
+              role: value as 'employee' | 'employer' | 'admin',
+            };
+          } else {
+            return {
+              ...user,
+              leaveBalances: {
+                ...user.leaveBalances,
+                [field]: Number(value),
+              },
+            };
+          }
+        }
+        return user;
+      })
+    );
   };
 
+  const updateUser = async (user: User) => {
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user),
+      });
 
-  const handleLogout = () => {
-    localStorage.clear(); // Clear role, email, etc.
-    router.push('/login'); // Redirect to login
-  };
-  const handleDelete = async (email: string) => {
-    if (!window.confirm(`Are you sure you want to delete ${email}?`)) return;
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Server error:', text);
+        throw new Error('Failed to update user');
+      }
 
-    const res = await fetch('/api/admin/delete-user', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) return alert(`Failed to delete: ${data.error}`);
-
-    setUsers((prev) => prev.filter((user) => user.email !== email));
-    alert('User deleted');
-  };
-
-  const submitPasswordReset = async (email: string) => {
-    if (!newPassword) return alert('Password cannot be empty');
-
-    const res = await fetch('/api/admin/reset-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, newPassword }),
-    });
-
-    const data = await res.json();
-    alert(data.message);
-    setResettingEmail(null);
-    setNewPassword('');
-  };
-
-  const handleCreateUser = async () => {
-    const { name, email, password, role } = newUser;
-    if (!name || !email || !password) {
-      alert('Please fill all fields');
-      return;
+      const data = await res.json();
+      if (data.success) {
+        alert('User updated');
+        setEditingUserId(null);
+        fetchUsers(); // Refresh full user list
+      } else {
+        alert(data.message || 'Update failed');
+      }
+    } catch (err) {
+      console.error('Error updating user:', err);
+      alert('An error occurred while updating the user.');
     }
+  };
 
+  const deleteUser = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+
+    try {
+      const res = await fetch('/api/admin/delete-user', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: id }),
+      });
+
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error('Invalid JSON response:', text);
+        alert('Unexpected server response.');
+        return;
+      }
+
+      if (data.success) {
+        alert('User deleted');
+        setUsers((prev) => prev.filter((u) => u._id !== id));
+      } else {
+        alert('Failed to delete user: ' + data.message);
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('An error occurred.');
+    }
+  };
+
+  const resetPassword = async (id: string) => {
+    const newPass = prompt('Enter new password');
+    if (newPass) {
+      const res = await fetch('/api/admin/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, newPassword: newPass }),
+      });
+      const data = await res.json();
+      if (data.success) alert('Password updated');
+      else alert(data.message || 'Failed to reset password');
+    }
+  };
+
+  const createUser = async () => {
     const res = await fetch('/api/admin/create-user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, role }),
+      body: JSON.stringify(newUser),
     });
-
     const data = await res.json();
-    if (!res.ok) return alert(data.error || 'Failed to create user');
-
-    alert('User created successfully');
-    setShowCreateForm(false);
-    setNewUser({ name: '', email: '', password: '', role: 'employee' });
-    fetchUsers();
+    if (data.success) {
+      alert('User created');
+      fetchUsers(); // Refresh list after creation
+      setNewUser({ name: '', email: '', password: '', role: 'employee' });
+    } else {
+      console.log('user creation failed:', data.message);
+      alert(data.message);
+    }
   };
 
-  const exportPDF = async () => {
-    const res = await fetch('/api/admin/export/pdf');
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'leave-report.pdf';
-    a.click();
-    a.remove();
-  };
+  const filteredUsers = users
+    .filter((u) => filteredRole === 'all' || u.role === filteredRole)
+    .filter(
+      (u) =>
+        (u.name?.toLowerCase() || '').includes(search.toLowerCase()) ||
+        (u.email?.toLowerCase() || '').includes(search.toLowerCase())
+    );
 
-  const exportExcel = async () => {
-    const res = await fetch('/api/admin/export/excel');
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'leave-report.xlsx';
-    a.click();
-    a.remove();
-  };
-
-  if (status === 'loading') return <div className="p-6">Loading...</div>;
+  const nonAdminUsers = filteredUsers.filter((u) => u.role !== 'admin');
+  const adminUsers = filteredUsers.filter((u) => u.role === 'admin');
 
   return (
-    <div className="p-6 bg-gray-100 min-h-screen">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-black">Admin Dashboard</h1>
-        <button
-          className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded"
-          onClick={() => setShowCreateForm(true)}
-        >
-          + Create New User
-        </button>
-      </div>
+    <div className="p-6 max-w-screen-xl mx-auto text-sm text-black">
+      <h1 className="text-3xl font-bold mb-6 text-center">Admin Dashboard</h1>
 
-      <div className="overflow-x-auto bg-white rounded shadow p-4 mb-6">
-        <h2 className="text-xl font-semibold mb-3 text-black">User Management</h2>
-        <table className="min-w-full text-sm text-left text-black">
-          <thead>
-            <tr>
-              <th className="py-2 px-3">Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>CL</th>
-              <th>SL</th>
-              <th>PL</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => {
-              const summary = leaveSummary[user.email] || { CL: 0, SL: 0, PL: 0 };
-              return (
-                <tr key={user._id} className="border-t">
-                  <td className="py-2 px-3">{user.name}</td>
-                  <td>{user.email}</td>
-                  <td>{user.role}</td>
-                  <td>{summary.CL}</td>
-                  <td>{summary.SL}</td>
-                  <td>{summary.PL}</td>
-                  <td className="space-y-1">
-                    {user.role !== 'admin' && (
-                      <button
-                        onClick={() => promoteToAdmin(user.email)}
-                        className="bg-blue-500 text-white px-3 py-1 rounded text-sm block"
-                      >
-                        Promote to Admin
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete(user.email)}
-                      className="bg-red-500 text-white px-3 py-1 rounded text-sm block"
-                    >
-                      Delete
-                    </button>
-                    <button
-                      onClick={() =>
-                        resettingEmail === user.email
-                          ? setResettingEmail(null)
-                          : setResettingEmail(user.email)
-                      }
-                      className="bg-yellow-500 text-white px-3 py-1 rounded text-sm block"
-                    >
-                      {resettingEmail === user.email ? 'Cancel' : 'Reset Password'}
-                    </button>
-                    {resettingEmail === user.email && (
-                      <div className="mt-2 space-y-1">
-                        <input
-                          type="password"
-                          placeholder="New Password"
-                          className="w-full p-2 border rounded"
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                        />
-                        <button
-                          onClick={() => submitPasswordReset(user.email)}
-                          className="bg-green-600 text-white px-3 py-1 rounded w-full"
-                        >
-                          Submit
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-<button
-      onClick={handleLogout}
-      className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 absolute top-4 right-4"
+      {/* Filter & Search */}
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-6 text-white">
+        <div>
+          <label className="mr-2 font-medium">Filter by Role:</label>
+          <select
+            value={filteredRole}
+            onChange={(e) => setFilteredRole(e.target.value)}
+            className="border px-2 py-1 rounded"
+          >
+            <option value="all">All</option>
+            {roles.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <input
+          type="text"
+          placeholder="Search by name or email"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="border px-3 py-1 rounded w-60"
+        />
+        <button
+      onClick={() => signOut({ callbackUrl: '/' })}
+      className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded"
     >
       Logout
     </button>
-      {/* Reports & Settings */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-4 rounded shadow">
-          <h2 className="text-xl font-semibold mb-2 text-black">Leave Policy Settings</h2>
-          <p className="text-black">Manage leave types, balances, and rules.</p>
-          <button
-            className="mt-4 bg-green-600 text-white px-4 py-2 rounded"
-            onClick={() => router.push('/dashboard/admin/policies')}
-          >
-            Configure Policies
-          </button>
-        </div>
+      </div>
 
-        <div className="bg-white p-4 rounded shadow">
-          <h2 className="text-xl font-semibold mb-2 text-black">Reports & Export</h2>
-          <div className="space-x-2 mt-4">
-            <button onClick={exportPDF} className="bg-purple-600 text-white px-4 py-2 rounded">
-              Export PDF
-            </button>
-            <button onClick={exportExcel} className="bg-yellow-500 text-white px-4 py-2 rounded">
-              Export Excel
-            </button>
-          </div>
+      {/* Create New User */}
+      <div className="bg-white p-6 mb-8 rounded shadow">
+        <h2 className="text-xl font-semibold mb-4">Create New User</h2>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            className="border p-2 rounded"
+            placeholder="Name"
+            value={newUser.name}
+            onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+          />
+          <input
+            className="border p-2 rounded"
+            placeholder="Email"
+            value={newUser.email}
+            onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+          />
+          <input
+            className="border p-2 rounded"
+            placeholder="Password"
+            value={newUser.password}
+            onChange={(e) =>
+              setNewUser({ ...newUser, password: e.target.value })
+            }
+          />
+          <select
+            className="border p-2 rounded"
+            value={newUser.role}
+            onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+          >
+            {roles.map((r) => (
+              <option key={r}>{r}</option>
+            ))}
+          </select>
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            onClick={createUser}
+          >
+            Create
+          </button>
         </div>
       </div>
 
-      {/* Create User Modal */}
-      {showCreateForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded shadow-lg w-96 space-y-3">
-            <h3 className="text-xl font-bold text-black">Create New User</h3>
+      {/* Users Table (Non-Admins) */}
+      <div className="overflow-x-auto mb-12">
+        <h2 className="text-xl font-semibold mb-2">Employees & Employers</h2>
+        <table className="w-full bg-white rounded shadow text-sm">
+          <thead className="bg-gray-800 text-white">
+            <tr>
+              <th className="p-2">Name</th>
+              <th className="p-2">Email</th>
+              <th className="p-2">Role</th>
+              <th className="p-2">CL</th>
+              <th className="p-2">SL</th>
+              <th className="p-2">PL</th>
+              <th className="p-2">maxCL</th>
+              <th className="p-2">maxSL</th>
+              <th className="p-2">maxPL</th>
+              <th className="p-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {nonAdminUsers.map((u) => (
+              <tr key={u._id} className="text-center border-t hover:bg-gray-50">
+                <td className="p-2">
+                  {editingUserId === u._id ? (
+                    <input
+                      className="border p-1 rounded text-center"
+                      value={u.name}
+                      onChange={(e) =>
+                        handleInputChange(u._id, 'name', e.target.value)
+                      }
+                    />
+                  ) : (
+                    u.name
+                  )}
+                </td>
+                <td className="p-2">{u.email}</td>
+                <td className="p-2">
+                  {editingUserId === u._id ? (
+                    <select
+                      value={u.role}
+                      onChange={(e) =>
+                        handleInputChange(u._id, 'role', e.target.value)
+                      }
+                      className="border p-1 rounded"
+                    >
+                      {roles.map((r) => (
+                        <option key={r}>{r}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    u.role
+                  )}
+                </td>
+                {['CL', 'SL', 'PL', 'maxCL', 'maxSL', 'maxPL'].map((field) => (
+                  <td key={field} className="p-2">
+                    {editingUserId === u._id ? (
+                      <input
+                        type="number"
+                        value={(u.leaveBalances as any)[field]}
+                        onChange={(e) =>
+                          handleInputChange(
+                            u._id,
+                            field as EditableField,
+                            e.target.value
+                          )
+                        }
+                        className="border w-16 p-1 rounded text-center"
+                      />
+                    ) : (
+                      (u.leaveBalances as any)[field]
+                    )}
+                  </td>
+                ))}
+                <td className="p-2 flex flex-col gap-1">
+                  {editingUserId === u._id ? (
+                    <button
+                      onClick={() => updateUser(u)}
+                      className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+                    >
+                      Save
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setEditingUserId(u._id)}
+                      className="bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  <button
+                    onClick={() => resetPassword(u._id)}
+                    className="bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+                  >
+                    Reset Pass
+                  </button>
+                  <button
+                    onClick={() => deleteUser(u._id)}
+                    className="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
-            <input
-              type="text"
-              placeholder="Full Name"
-              className="w-full p-2 border rounded"
-              value={newUser.name}
-              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-            />
-            <input
-              type="email"
-              placeholder="Email"
-              className="w-full p-2 border rounded"
-              value={newUser.email}
-              onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              className="w-full p-2 border rounded"
-              value={newUser.password}
-              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-            />
-            <select
-              className="w-full p-2 border rounded"
-              value={newUser.role}
-              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-            >
-              <option value="employee">Employee</option>
-              <option value="admin">Admin</option>
-            </select>
-
-            <div className="flex justify-end gap-2">
-              <button
-                className="bg-gray-400 text-white px-4 py-2 rounded"
-                onClick={() => setShowCreateForm(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="bg-blue-600 text-white px-4 py-2 rounded"
-                onClick={handleCreateUser}
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      
+      {/* Admins Table */}
+      <div className="overflow-x-auto">
+        <h2 className="text-xl font-semibold mb-2">Admins</h2>
+        <table className="w-full bg-white rounded shadow text-sm">
+          <thead className="bg-gray-800 text-white">
+            <tr>
+              <th className="p-2">Name</th>
+              <th className="p-2">Email</th>
+              <th className="p-2">Role</th>
+              <th className="p-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {adminUsers.map((u) => (
+              <tr key={u._id} className="text-center border-t hover:bg-gray-50">
+                <td className="p-2">{u.name}</td>
+                <td className="p-2">{u.email}</td>
+                <td className="p-2">{u.role}</td>
+                <td className="p-2 flex flex-col gap-1">
+                  <button
+                    onClick={() => resetPassword(u._id)}
+                    className="bg-yellow-500 text-white px-2 py-1 rounded hover:bg-yellow-600"
+                  >
+                    Reset Password
+                  </button>
+                  <button
+                    onClick={() => deleteUser(u._id)}
+                    className="bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
-    
   );
 }

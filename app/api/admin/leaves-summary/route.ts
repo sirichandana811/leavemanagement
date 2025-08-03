@@ -6,7 +6,6 @@ import Policy from "@/models/policyModel";
 export async function GET(req: NextRequest) {
   try {
     await connectDB();
-
     const policy = await Policy.findOne().sort({ createdAt: -1 }); // get the latest policy
 
     if (!policy) {

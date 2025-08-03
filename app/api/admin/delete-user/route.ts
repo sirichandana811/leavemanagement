@@ -1,23 +1,23 @@
-import { connectDB } from "@/lib/mongodb";
-import User from "@/models/userModel"; // Ensure this path is correct
-import { NextResponse } from "next/server";
+// app/api/admin/delete-user/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import {connectDB} from '@/lib/mongodb'; // use your actual DB connection path
+import User from '@/models/userModel';
 
-export async function POST(req: Request) {
+export async function DELETE(req: NextRequest) {
   try {
-    const { email } = await req.json();
-    if (!email) return NextResponse.json({ error: "Email is required" }, { status: 400 });
+    const { userId } = await req.json();
+
+    if (!userId) {
+      return NextResponse.json({ success: false, message: 'Missing userId' }, { status: 400 });
+    }
 
     await connectDB();
 
-    const deletedUser = await User.findOneAndDelete({ email });
+    await User.findByIdAndDelete(userId);
 
-    if (!deletedUser) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ message: "User deleted successfully" });
+    return NextResponse.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {
-    console.error("Delete User Error:", error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    console.error('Error deleting user:', error);
+    return NextResponse.json({ success: false, message: 'Server error' }, { status: 500 });
   }
 }

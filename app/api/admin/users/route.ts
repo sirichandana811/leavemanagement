@@ -1,25 +1,43 @@
+// app/api/admin/users/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../auth/[...nextauth]/route';
+import {connectDB} from '@/lib/mongodb';
 import User from '@/models/userModel';
-import { connectDB } from '@/lib/mongodb';
-import Leave from '@/models/leaveModel';
 
-// Admin route to fetch all users
-
-export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-
-  if (!session || session.user.role !== 'admin') {
-    return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-  }
-
-  await connectDB();
-
+export async function PUT(req: NextRequest) {
   try {
-    const users = await User.find().select('+password');
-    return NextResponse.json({ users }, { status: 200 });
+    await connectDB();
+    const body = await req.json();
+
+    const { _id, name, email, role, leaveBalances } = body;
+
+    if (!_id) {
+      return NextResponse.json({ success: false, message: 'Missing user ID' }, { status: 400 });
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      _id,
+      { name, email, role, leaveBalances },
+      { new: true }
+    );
+
+    if (!updatedUser) {
+      return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true, user: updatedUser });
+  } catch (err: any) {
+    console.error('API error:', err.message);
+    return NextResponse.json({ success: false, message: 'Server error' }, { status: 500 });
+  }
+}
+export async function GET() {
+  try {
+    await connectDB();
+    const users = await User.find({});
+    return NextResponse.json({ users });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch users' }, { status: 500 });
+    console.error('Error fetching users:', error);
+    return NextResponse.json({ users: [] }, { status: 500 });
   }
 }

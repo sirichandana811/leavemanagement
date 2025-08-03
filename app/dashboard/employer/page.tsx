@@ -1,147 +1,104 @@
 'use client';
+
 import { useEffect, useState } from 'react';
+import { useSession, signOut } from 'next-auth/react';
 
 type Leave = {
   _id: string;
   userEmail: string;
-  leaveType: string;
+  leaveType: 'CL' | 'SL' | 'PL';
   startDate: string;
   endDate: string;
   reason: string;
-  status: string;
+  status: 'Pending' | 'Approved' | 'Rejected';
 };
 
-type LeaveBalance = {
-  [key: string]: number; // e.g., { CL: 5, SL: 2 }
-};
-
-type UserBalanceMap = {
-  [email: string]: LeaveBalance;
-};
-
-const EmployerDashboard = () => {
+export default function EmployerDashboard() {
+  const { data: session, status } = useSession();
   const [leaves, setLeaves] = useState<Leave[]>([]);
-  const [balances, setBalances] = useState<UserBalanceMap>({});
   const [message, setMessage] = useState('');
 
-  // Fetch leave applications
   useEffect(() => {
-    fetch('/api/leaves/all')
-      .then((res) => res.json())
-      .then((data) => setLeaves(data))
-      .catch(() => setMessage('Failed to fetch leave records'));
-
-    // Fetch user leave balances
-    fetch('/api/users/balances')
-      .then((res) => res.json())
-      .then((data) => setBalances(data))
-      .catch(() => setMessage('Failed to fetch user balances'));
-  }, []);
-
-  const updateStatus = async (id: string, newStatus: string, leave: Leave) => {
-    if (newStatus === 'Approved') {
-      const userBalance = balances[leave.userEmail];
-      const currentBalance = userBalance?.[leave.leaveType] || 0;
-
-      const daysRequested =
-        (new Date(leave.endDate).getTime() - new Date(leave.startDate).getTime()) /
-        (1000 * 60 * 60 * 24) + 1;
-
-      if (daysRequested > currentBalance) {
-        setMessage(`Cannot approve. ${leave.userEmail} has insufficient ${leave.leaveType} balance.`);
-        return;
-      }
+    if (status === 'authenticated') {
+      fetch('/api/employer/emp-leaves')
+        .then((res) => res.json())
+        .then((data) => setLeaves(data.leaves))
+        .catch(console.error);
     }
+  }, [status]);
 
-    try {
-      const res = await fetch(`/api/leaves/update`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ id, status: newStatus }),
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        setLeaves((prev) =>
-          prev.map((item) => (item._id === id ? { ...item, status: newStatus } : item))
-        );
-        setMessage('Status updated successfully');
-      } else {
-        setMessage('Failed to update status');
-      }
-    } catch (error) {
-      setMessage('Error updating status');
+  const updateStatus = async (id: string, newStatus: 'Approved' | 'Rejected') => {
+    const res = await fetch('/api/employer/emp-leaves', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, newStatus }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setMessage(`Leave ${newStatus}`);
+      setLeaves((prev) =>
+        prev.map((l) => (l._id === id ? { ...l, status: newStatus } : l))
+      );
+    } else {
+      setMessage(data.message);
     }
   };
 
-  return (
-    <div className="max-w-6xl mx-auto mt-10 p-6 bg-white rounded shadow">
-      <h1 className="text-3xl font-bold mb-6 text-center">Employer Dashboard</h1>
-      {message && <p className="mb-4 text-center text-red-600">{message}</p>}
+  if (status === 'loading') return <p>Loading...</p>;
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-gray-300">
-          <thead className="bg-purple-700 text-white">
-            <tr>
-              <th className="p-3 border">Email</th>
-              <th className="p-3 border">Type</th>
-              <th className="p-3 border">From</th>
-              <th className="p-3 border">To</th>
-              <th className="p-3 border">Reason</th>
-              <th className="p-3 border">Status</th>
-              <th className="p-3 border">Actions</th>
+  return (
+    <div className="min-h-screen bg-gray-100 p-6 text-black">
+      <h1 className="text-3xl font-bold mb-4">Employer Dashboard</h1>
+      {message && <p className="mb-2 text-center text-green-600">{message}</p>}
+      <table className="w-full bg-white rounded shadow">
+        <thead className="bg-purple-700 text-white">
+          <tr>
+            <th>Email</th>
+            <th>Type</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Reason</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {leaves.map((l) => (
+            <tr key={l._id} className="text-center border-t">
+              <td>{l.userEmail}</td>
+              <td>{l.leaveType}</td>
+              <td>{l.startDate}</td>
+              <td>{l.endDate}</td>
+              <td>{l.reason}</td>
+              <td>{l.status}</td>
+              <td>
+                {l.status === 'Pending' && (
+                  <>
+                    <button
+                      onClick={() => updateStatus(l._id, 'Approved')}
+                      className="bg-green-600 text-white px-2 py-1 rounded mr-2"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => updateStatus(l._id, 'Rejected')}
+                      className="bg-red-600 text-white px-2 py-1 rounded"
+                    >
+                      Reject
+                    </button>
+                  </>
+                )}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {leaves.map((leave) => (
-              <tr key={leave._id} className="text-center border-t">
-                <td className="p-2 border">{leave.userEmail}</td>
-                <td className="p-2 border">{leave.leaveType}</td>
-                <td className="p-2 border">{leave.startDate}</td>
-                <td className="p-2 border">{leave.endDate}</td>
-                <td className="p-2 border">{leave.reason}</td>
-                <td
-                  className={`p-2 border font-semibold ${
-                    leave.status === 'Pending'
-                      ? 'text-yellow-600'
-                      : leave.status === 'Approved'
-                      ? 'text-green-600'
-                      : 'text-red-600'
-                  }`}
-                >
-                  {leave.status}
-                </td>
-                <td className="p-2 border space-x-2">
-                  <button
-                    onClick={() => updateStatus(leave._id, 'Approved', leave)}
-                    className="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => updateStatus(leave._id, 'Rejected', leave)}
-                    className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
-                  >
-                    Reject
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {leaves.length === 0 && (
-              <tr>
-                <td colSpan={7} className="text-center py-4">
-                  No leave applications found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
+      <button
+        onClick={() => signOut({ callbackUrl: '/' })}
+        className="mt-4 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+      >
+        Logout
+      </button>
     </div>
   );
-};
-
-export default EmployerDashboard;
+}
