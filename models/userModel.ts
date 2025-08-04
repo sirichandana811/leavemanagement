@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ["employee", "employer", "admin"],
     required: true,
-  },
+  }, createdAt: { type: Date, default: Date.now },
   // Leave Balances
   leaveBalances: {
     CL: { type: Number, default: 10 },

@@ -79,8 +79,15 @@ export default function LoginPage() {
         >
           Login
         </button>
-
-        
+<p className="text-sm text-center text-black">
+          Don't have an account?{' '}
+          <Link
+            href="/signup"
+            className="text-blue-600 font-semibold underline hover:text-blue-800"
+          >
+            Sign up here
+          </Link>
+        </p>
 
         <p className="text-sm text-center text-black">
           Are you an admin?{' '}
